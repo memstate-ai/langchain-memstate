@@ -76,7 +76,7 @@ class MemstateStore(BaseStore):
             headers={
                 "X-API-Key": api_key,
                 "Content-Type": "application/json",
-                "User-Agent": "langchain-memstate/0.2.0",
+                "User-Agent": "langchain-memstate/0.2.1",
             },
             timeout=timeout,
         )
@@ -89,7 +89,7 @@ class MemstateStore(BaseStore):
                 headers={
                     "X-API-Key": self.api_key,
                     "Content-Type": "application/json",
-                    "User-Agent": "langchain-memstate/0.2.0",
+                    "User-Agent": "langchain-memstate/0.2.1",
                 },
                 timeout=self.timeout,
             )
@@ -100,13 +100,19 @@ class MemstateStore(BaseStore):
     # -------------------------------------------------------------------------
 
     def _namespace_to_keypath(self, namespace: tuple[str, ...], key: str) -> str:
-        """Convert (namespace, key) → dot-separated keypath.
+        """Convert (namespace, key) to a dot-separated Memstate keypath.
 
         LangGraph namespace ("users", "alice") + key "theme"
-        → keypath "users.alice.theme"
+        becomes keypath "users.alice.theme".
+
+        Memstate keypaths only allow [a-z0-9_] segments, so we sanitize
+        each part: lowercase, replace hyphens/spaces/dots with underscores.
         """
         parts = list(namespace) + [key]
-        return ".".join(p.replace(".", "_") for p in parts)
+        return ".".join(
+            p.lower().replace("-", "_").replace(" ", "_").replace(".", "_")
+            for p in parts
+        )
 
     def _namespace_to_project(self, namespace: tuple[str, ...]) -> str:
         """Derive project_id from namespace or use the default."""
@@ -118,7 +124,10 @@ class MemstateStore(BaseStore):
 
     def _namespace_prefix_to_keypath(self, namespace_prefix: tuple[str, ...]) -> str:
         """Convert namespace prefix tuple to dot-separated keypath prefix."""
-        return ".".join(p.replace(".", "_") for p in namespace_prefix)
+        return ".".join(
+            p.lower().replace("-", "_").replace(" ", "_").replace(".", "_")
+            for p in namespace_prefix
+        )
 
     def _keypath_to_namespace_key(
         self, keypath: str, project_id: str
@@ -286,23 +295,36 @@ class MemstateStore(BaseStore):
 
         items: list[SearchItem] = []
         for r in results[offset:]:
-            kp = r.get("keypath", "")
+            # API returns {"memory": {...}, "score": ...} structure
+            mem = r.get("memory") or r  # fall back to flat structure for compatibility
+            score = r.get("score")
+            kp = mem.get("keypath", "")
             ns, key = self._keypath_to_namespace_key(kp, project_id)
-            raw = r.get("content") or r.get("summary", "")
+            raw = mem.get("content") or mem.get("summary", "")
             try:
                 value = json.loads(raw)
                 if not isinstance(value, dict):
-                    value = {"value": raw, "summary": r.get("summary", "")}
+                    value = {"value": raw, "summary": mem.get("summary", "")}
             except (json.JSONDecodeError, TypeError):
-                value = {"value": raw, "summary": r.get("summary", "")}
+                value = {"value": raw, "summary": mem.get("summary", "")}
+            created_at = mem.get("created_at")
+            updated_at = mem.get("updated_at") or created_at
             items.append(
                 SearchItem(
                     namespace=ns,
                     key=key,
                     value=value,
-                    created_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc),
-                    score=r.get("score"),
+                    created_at=(
+                        datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                        if created_at
+                        else datetime.now(timezone.utc)
+                    ),
+                    updated_at=(
+                        datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                        if updated_at
+                        else datetime.now(timezone.utc)
+                    ),
+                    score=score,
                 )
             )
         return items
@@ -439,23 +461,36 @@ class MemstateStore(BaseStore):
         results = data.get("results", [])
         items: list[SearchItem] = []
         for r in results[offset:]:
-            kp = r.get("keypath", "")
+            # API returns {"memory": {...}, "score": ...} structure
+            mem = r.get("memory") or r  # fall back to flat structure for compatibility
+            score = r.get("score")
+            kp = mem.get("keypath", "")
             ns, key = self._keypath_to_namespace_key(kp, project_id)
-            raw = r.get("content") or r.get("summary", "")
+            raw = mem.get("content") or mem.get("summary", "")
             try:
                 value = json.loads(raw)
                 if not isinstance(value, dict):
-                    value = {"value": raw, "summary": r.get("summary", "")}
+                    value = {"value": raw, "summary": mem.get("summary", "")}
             except (json.JSONDecodeError, TypeError):
-                value = {"value": raw, "summary": r.get("summary", "")}
+                value = {"value": raw, "summary": mem.get("summary", "")}
+            created_at = mem.get("created_at")
+            updated_at = mem.get("updated_at") or created_at
             items.append(
                 SearchItem(
                     namespace=ns,
                     key=key,
                     value=value,
-                    created_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc),
-                    score=r.get("score"),
+                    created_at=(
+                        datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                        if created_at
+                        else datetime.now(timezone.utc)
+                    ),
+                    updated_at=(
+                        datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                        if updated_at
+                        else datetime.now(timezone.utc)
+                    ),
+                    score=score,
                 )
             )
         return items

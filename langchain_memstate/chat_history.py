@@ -76,13 +76,16 @@ class MemstateChatMessageHistory(BaseChatMessageHistory):
         self.project_id = project_id
         self.base_url = base_url.rstrip("/")
         self.keypath_prefix = keypath_prefix
-        self._keypath = f"{keypath_prefix}.{session_id}.messages"
+        # Sanitize session_id for use in a keypath: replace hyphens with underscores
+        # Memstate keypaths only allow [a-z0-9_] segments separated by dots
+        safe_session_id = session_id.replace("-", "_").lower()
+        self._keypath = f"{keypath_prefix}.{safe_session_id}.messages"
         self._client = httpx.Client(
             base_url=self.base_url,
             headers={
                 "X-API-Key": api_key,
                 "Content-Type": "application/json",
-                "User-Agent": "langchain-memstate/0.2.0",
+                "User-Agent": "langchain-memstate/0.2.1",
             },
             timeout=timeout,
         )

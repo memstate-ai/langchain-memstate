@@ -25,7 +25,7 @@ def _make_client(api_key: str, base_url: str) -> httpx.Client:
         headers={
             "X-API-Key": api_key,
             "Content-Type": "application/json",
-            "User-Agent": "langchain-memstate/0.2.0",
+            "User-Agent": "langchain-memstate/0.2.1",
         },
         timeout=30.0,
     )
@@ -102,15 +102,15 @@ class TimeTravelInput(BaseModel):
 class MemstateRememberTool(BaseTool):
     """Store a structured fact in Memstate AI at a specific keypath.
 
-    Memstate automatically versions the memory if it already exists —
-    the previous value is preserved in history and can be retrieved later.
+    Memstate automatically versions the memory if it already exists.
+    The previous value is preserved in history and can be retrieved later.
     """
 
     name: str = "memstate_remember"
     description: str = (
         "Store a fact or piece of information in long-term memory at a structured "
         "keypath. Use dot-notation for the keypath to organize memories hierarchically. "
-        "Memstate automatically versions memories — if a fact changes, the old version "
+        "Memstate automatically versions memories. If a fact changes, the old version "
         "is preserved. Use this when you learn something important that should persist "
         "across sessions."
     )
@@ -132,10 +132,11 @@ class MemstateRememberTool(BaseTool):
             )
             resp.raise_for_status()
             data = resp.json()
-        memory_id = data.get("id", "unknown")
+        memory_id = data.get("memory_id", data.get("id", "unknown"))
         version = data.get("version", 1)
+        action = data.get("action", "stored")
         return (
-            f"Stored memory at keypath '{keypath}' "
+            f"Successfully {action} memory at keypath '{keypath}' "
             f"(id={memory_id}, version={version}). "
             f"Previous versions are preserved in history."
         )
@@ -182,9 +183,11 @@ class MemstateRecallTool(BaseTool):
 
         lines = [f"Found {len(results)} relevant memories:\n"]
         for i, r in enumerate(results, 1):
+            # API returns {"memory": {...}, "score": ...} structure
+            mem = r.get("memory") or r
             score = r.get("score") or 0.0
-            keypath = r.get("keypath", "unknown")
-            summary = r.get("summary") or r.get("content", "")
+            keypath = mem.get("keypath", "unknown")
+            summary = mem.get("summary") or mem.get("content", "")
             lines.append(
                 f"{i}. [{keypath}] (score={score:.3f})\n   {summary}"
             )
