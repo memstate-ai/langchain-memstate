@@ -11,6 +11,7 @@ import pytest
 from langchain_memstate import (
     MemstateRecallTool,
     MemstateRememberTool,
+    MemstateStoreTool,
     MemstateBrowseTool,
     MemstateGetHistoryTool,
     MemstateTimeTravelTool,
@@ -27,6 +28,11 @@ PROJECT_ID = f"langchain-tools-test-{TEST_RUN_ID}"
 @pytest.fixture(scope="module")
 def remember_tool():
     return MemstateRememberTool(api_key=API_KEY, project_id=PROJECT_ID, base_url=BASE_URL)
+
+
+@pytest.fixture(scope="module")
+def store_tool():
+    return MemstateStoreTool(api_key=API_KEY, project_id=PROJECT_ID, base_url=BASE_URL)
 
 
 @pytest.fixture(scope="module")
@@ -50,29 +56,68 @@ def time_travel_tool():
 
 
 class TestMemstateRememberTool:
-    def test_remember_returns_confirmation(self, remember_tool):
-        """Remember tool should return a confirmation string with keypath."""
-        result = remember_tool._run(
-            content="Alice is a Senior Backend Engineer who prefers Python and Go",
-            keypath=f"users.alice.role",
-        )
-        assert isinstance(result, str)
-        assert "users.alice.role" in result
+    """Tests for the primary auto-extraction remember tool."""
 
-    def test_remember_includes_version_info(self, remember_tool):
-        """Remember tool result should mention versioning."""
+    def test_remember_returns_confirmation(self, remember_tool):
+        """Remember tool should return a confirmation string."""
         result = remember_tool._run(
-            content="The database is PostgreSQL 16",
-            keypath=f"project.database.engine",
+            content="Alice is a Senior Backend Engineer who prefers Python and Go. "
+                    "She works on the authentication and payments services.",
         )
         assert isinstance(result, str)
-        # Should mention version or id
+        # Should mention job_id (async) or ingestion_id (sync)
+        assert any(word in result.lower() for word in ["job_id", "ingestion_id", "queued", "remember"])
+
+    def test_remember_with_source(self, remember_tool):
+        """Remember tool should accept optional source hint."""
+        result = remember_tool._run(
+            content="## Architecture Decision\nMigrated from REST to GraphQL for the mobile API.",
+            source="agent",
+        )
+        assert isinstance(result, str)
+
+    def test_remember_with_context(self, remember_tool):
+        """Remember tool should accept optional context hint."""
+        result = remember_tool._run(
+            content="The database is PostgreSQL 16 with pgvector for semantic search.",
+            context="infrastructure decisions",
+        )
+        assert isinstance(result, str)
+
+    def test_remember_no_keypath_required(self, remember_tool):
+        """Remember tool should not require a keypath -- auto-extraction handles it."""
+        # This is the key difference from the old API: no keypath needed
+        result = remember_tool._run(
+            content="OAuth2 with JWT tokens, 24h expiry, RS256 signing algorithm.",
+        )
+        assert isinstance(result, str)
+
+
+class TestMemstateStoreTool:
+    """Tests for the precise keypath store tool."""
+
+    def test_store_returns_confirmation(self, store_tool):
+        """Store tool should return a confirmation string with keypath."""
+        result = store_tool._run(
+            content="5432",
+            keypath=f"config.database.port",
+        )
+        assert isinstance(result, str)
+        assert "config.database.port" in result
+
+    def test_store_includes_version_info(self, store_tool):
+        """Store tool result should mention versioning."""
+        result = store_tool._run(
+            content="production",
+            keypath=f"status.deployment",
+        )
+        assert isinstance(result, str)
         assert any(word in result.lower() for word in ["version", "id", "stored", "keypath"])
 
-    def test_remember_nested_keypath(self, remember_tool):
-        """Remember tool should handle deeply nested keypaths."""
-        result = remember_tool._run(
-            content="OAuth2 with JWT tokens, 24h expiry",
+    def test_store_nested_keypath(self, store_tool):
+        """Store tool should handle deeply nested keypaths."""
+        result = store_tool._run(
+            content="OAuth2",
             keypath=f"project.myapp.auth.provider",
         )
         assert isinstance(result, str)
@@ -81,13 +126,13 @@ class TestMemstateRememberTool:
 
 class TestMemstateRecallTool:
     @pytest.fixture(autouse=True)
-    def seed(self, remember_tool):
+    def seed(self, store_tool):
         """Seed memories before recall tests."""
-        remember_tool._run(
+        store_tool._run(
             content="Bob is a Frontend Engineer specializing in React and TypeScript",
             keypath="users.bob.role",
         )
-        remember_tool._run(
+        store_tool._run(
             content="The frontend uses React 18 with TypeScript",
             keypath="project.frontend.framework",
         )
@@ -116,17 +161,17 @@ class TestMemstateRecallTool:
 
 class TestMemstateBrowseTool:
     @pytest.fixture(autouse=True)
-    def seed(self, remember_tool):
+    def seed(self, store_tool):
         """Seed memories for browse tests."""
-        remember_tool._run(
+        store_tool._run(
             content="PostgreSQL 16 with pgvector",
             keypath="project.infra.database",
         )
-        remember_tool._run(
+        store_tool._run(
             content="Redis 7 for caching and sessions",
             keypath="project.infra.cache",
         )
-        remember_tool._run(
+        store_tool._run(
             content="Cloudflare for CDN and DDoS protection",
             keypath="project.infra.cdn",
         )
@@ -145,19 +190,19 @@ class TestMemstateBrowseTool:
 
 class TestMemstateGetHistoryTool:
     @pytest.fixture(autouse=True)
-    def seed_with_versions(self, remember_tool):
+    def seed_with_versions(self, store_tool):
         """Create multiple versions of a memory."""
-        remember_tool._run(
+        store_tool._run(
             content="Using Basic Auth for API authentication",
             keypath="project.api.auth",
         )
         time.sleep(0.5)
-        remember_tool._run(
+        store_tool._run(
             content="Migrated to OAuth2 + JWT for API authentication",
             keypath="project.api.auth",
         )
         time.sleep(0.5)
-        remember_tool._run(
+        store_tool._run(
             content="Now using OAuth2 + JWT + MFA for API authentication",
             keypath="project.api.auth",
         )
@@ -190,9 +235,9 @@ class TestMemstateTimeTravelTool:
 
 class TestGetMemstateTools:
     def test_get_all_tools(self):
-        """get_memstate_tools should return all 5 tools by default."""
+        """get_memstate_tools should return all 6 tools by default."""
         tools = get_memstate_tools(api_key=API_KEY, project_id=PROJECT_ID)
-        assert len(tools) == 5
+        assert len(tools) == 6
 
     def test_get_specific_tools(self):
         """get_memstate_tools should return only specified tools."""
@@ -206,12 +251,23 @@ class TestGetMemstateTools:
         assert "memstate_remember" in names
         assert "memstate_recall" in names
 
+    def test_get_store_tool(self):
+        """get_memstate_tools should include memstate_store tool."""
+        tools = get_memstate_tools(
+            api_key=API_KEY,
+            project_id=PROJECT_ID,
+            include_tools=["store"],
+        )
+        assert len(tools) == 1
+        assert tools[0].name == "memstate_store"
+
     def test_tools_have_correct_names(self):
         """All tools should have the expected names."""
         tools = get_memstate_tools(api_key=API_KEY, project_id=PROJECT_ID)
         names = {t.name for t in tools}
         expected = {
             "memstate_remember",
+            "memstate_store",
             "memstate_recall",
             "memstate_browse",
             "memstate_get_history",
@@ -229,19 +285,15 @@ class TestGetMemstateTools:
 
 class TestMemstateRetriever:
     @pytest.fixture(autouse=True)
-    def seed(self):
+    def seed(self, store_tool):
         """Seed memories for retriever tests."""
-        from langchain_memstate import MemstateStore
-        store = MemstateStore(api_key=API_KEY, base_url=BASE_URL, project_id=PROJECT_ID)
-        store.put(
-            ("retriever_test",),
-            "database",
-            {"value": "We use PostgreSQL 16 with pgvector for vector similarity search"},
+        store_tool._run(
+            content="We use PostgreSQL 16 with pgvector for vector similarity search",
+            keypath="retriever_test.database",
         )
-        store.put(
-            ("retriever_test",),
-            "auth",
-            {"value": "Authentication uses OAuth2 with JWT tokens"},
+        store_tool._run(
+            content="Authentication uses OAuth2 with JWT tokens",
+            keypath="retriever_test.auth",
         )
         time.sleep(1.0)
 

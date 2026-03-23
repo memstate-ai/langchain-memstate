@@ -20,29 +20,46 @@ def main():
     tool_map = {t.name: t for t in tools}
 
     print(f"Available tools: {[t.name for t in tools]}\n")
-    assert len(tools) == 5, f"Expected 5 tools, got {len(tools)}"
+    assert len(tools) == 6, f"Expected 6 tools, got {len(tools)}"
 
-    # --- remember ---
-    print("Tool: memstate_remember")
+    # --- remember (auto-extraction) ---
+    print("Tool: memstate_remember (auto-extraction)")
     result = tool_map["memstate_remember"].invoke({
-        "keypath": "users.alice.stack.language",
-        "content": "Alice prefers Python for backend services and TypeScript for frontend work"
+        "content": (
+            "Alice is a Senior Backend Engineer. She prefers Python for backend services "
+            "and TypeScript for frontend work. Her go-to database is PostgreSQL for "
+            "production and SQLite for local dev."
+        ),
+        "source": "agent",
     })
     print(f"  result: {result}")
-    assert "success" in result.lower() or "stored" in result.lower() or "remember" in result.lower() or "alice" in result.lower(), \
+    assert any(word in result.lower() for word in ["job_id", "ingestion_id", "queued", "remember"]), \
         f"Unexpected remember result: {result}"
 
-    result2 = tool_map["memstate_remember"].invoke({
+    # --- store (precise keypath) ---
+    print("\nTool: memstate_store (precise keypath)")
+    result = tool_map["memstate_store"].invoke({
+        "keypath": "users.alice.stack.language",
+        "content": "Python (backend) and TypeScript (frontend)",
+    })
+    print(f"  result: {result}")
+    assert "users.alice.stack.language" in result, \
+        f"Unexpected store result: {result}"
+
+    result2 = tool_map["memstate_store"].invoke({
         "keypath": "users.alice.stack.database",
-        "content": "Alice uses PostgreSQL for production and SQLite for local dev"
+        "content": "PostgreSQL (production), SQLite (local dev)",
     })
     print(f"  result: {result2}")
 
-    result3 = tool_map["memstate_remember"].invoke({
+    # Update the language fact -- creates a new version
+    result3 = tool_map["memstate_store"].invoke({
         "keypath": "users.alice.stack.language",
-        "content": "Alice now primarily uses Rust for performance-critical backend services"
+        "content": "Rust (performance-critical backend), Python (scripting), TypeScript (frontend)",
     })
     print(f"  result (update): {result3}")
+
+    import time; time.sleep(1.0)
 
     # --- recall ---
     print("\nTool: memstate_recall")

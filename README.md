@@ -177,7 +177,8 @@ When using `get_memstate_tools()`, your agent gets access to:
 
 | Tool | Description |
 |---|---|
-| `memstate_remember` | Store a fact at a structured keypath (auto-versioned) |
+| `memstate_remember` | **Primary tool.** Pass any text and Memstate's custom-trained AI automatically extracts facts and organizes them into keypaths |
+| `memstate_store` | Store a specific value at an exact keypath. Use when you already know the keypath (auto-versioned) |
 | `memstate_recall` | Semantic search across all memories |
 | `memstate_browse` | Browse the knowledge tree by keypath prefix |
 | `memstate_get_history` | Get version history for a keypath |

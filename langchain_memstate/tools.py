@@ -2,13 +2,14 @@
 Memstate AI tools for LangChain agents.
 
 Provides a set of structured tools that give agents direct access to
-Memstate's keypath-based memory system, including remember, recall,
-browse, and time-travel capabilities.
+Memstate's memory system. The primary tool is `memstate_remember`, which
+accepts any text or markdown and lets Memstate's custom-trained models
+automatically extract facts and organize them into a hierarchical keypath
+structure. No manual keypath management required.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any, Optional, Type
 
@@ -25,9 +26,9 @@ def _make_client(api_key: str, base_url: str) -> httpx.Client:
         headers={
             "X-API-Key": api_key,
             "Content-Type": "application/json",
-            "User-Agent": "langchain-memstate/0.2.1",
+            "User-Agent": "langchain-memstate/0.3.0",
         },
-        timeout=30.0,
+        timeout=60.0,
     )
 
 
@@ -39,16 +40,41 @@ def _make_client(api_key: str, base_url: str) -> httpx.Client:
 class RememberInput(BaseModel):
     content: str = Field(
         description=(
-            "The fact or information to remember. Be specific and precise. "
-            "Example: 'Alice prefers Python over JavaScript for backend work.'"
+            "Any text, markdown, or notes to remember. Memstate's models automatically "
+            "extract facts and organize them into a hierarchical keypath structure. "
+            "You do not need to specify keypaths -- just dump what you learned. "
+            "Examples: a task summary, meeting notes, code documentation, "
+            "a list of decisions made, or any freeform text."
+        )
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional source type hint to help with extraction. "
+            "Examples: 'agent', 'readme', 'docs', 'meeting', 'code'"
+        ),
+    )
+    context: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional hint to guide keypath extraction. "
+            "Example: 'authentication module decisions'"
+        ),
+    )
+
+
+class StoreInput(BaseModel):
+    content: str = Field(
+        description=(
+            "The exact value to store at this keypath. Keep it short and specific. "
+            "For longer content or multiple facts, use memstate_remember instead."
         )
     )
     keypath: str = Field(
         description=(
-            "Dot-separated path to organize this memory in a hierarchy. "
+            "Dot-separated path to store this value at. "
             "Use descriptive, lowercase segments. "
-            "Examples: 'users.alice.preferences.language', "
-            "'project.myapp.auth.provider', 'team.engineering.decisions.database'"
+            "Examples: 'config.database.port', 'status.deployment', 'version.current'"
         )
     )
 
@@ -89,7 +115,7 @@ class TimeTravelInput(BaseModel):
     revision: int = Field(
         description=(
             "Revision number to time-travel to. "
-            "Use get_history to find valid revision numbers."
+            "Use memstate_get_history to find valid revision numbers."
         )
     )
 
@@ -100,21 +126,89 @@ class TimeTravelInput(BaseModel):
 
 
 class MemstateRememberTool(BaseTool):
-    """Store a structured fact in Memstate AI at a specific keypath.
+    """Save any text or markdown to Memstate AI.
 
-    Memstate automatically versions the memory if it already exists.
-    The previous value is preserved in history and can be retrieved later.
+    Memstate's custom-trained models automatically extract facts from the
+    content and organize them into a hierarchical keypath structure. No
+    manual keypath management required -- just dump what you learned.
+
+    Processing is async (~15-20s). The tool returns a job_id immediately.
     """
 
     name: str = "memstate_remember"
     description: str = (
-        "Store a fact or piece of information in long-term memory at a structured "
-        "keypath. Use dot-notation for the keypath to organize memories hierarchically. "
-        "Memstate automatically versions memories. If a fact changes, the old version "
-        "is preserved. Use this when you learn something important that should persist "
-        "across sessions."
+        "Save information to long-term memory. Pass any text, markdown, task summary, "
+        "meeting notes, or documentation. Memstate's AI models automatically extract "
+        "facts and organize them into a structured keypath hierarchy -- you do not need "
+        "to specify keypaths. This is the recommended way to save information. "
+        "Use this after completing tasks, learning new facts, or any time you want "
+        "something to persist across sessions. Processing is async; returns a job_id."
     )
     args_schema: Type[BaseModel] = RememberInput
+
+    api_key: str
+    project_id: str
+    base_url: str = "https://api.memstate.ai"
+
+    def _run(
+        self,
+        content: str,
+        source: Optional[str] = None,
+        context: Optional[str] = None,
+    ) -> str:
+        payload: dict[str, Any] = {
+            "content": content,
+            "project_id": self.project_id,
+        }
+        if source:
+            payload["source"] = source
+        if context:
+            payload["context"] = context
+
+        with _make_client(self.api_key, self.base_url) as client:
+            resp = client.post(
+                "/api/v1/memories/remember",
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        # Async response: job enqueued
+        if "job_id" in data:
+            job_id = data["job_id"]
+            status = data.get("status", "pending")
+            return (
+                f"Memory queued for processing (job_id={job_id}, status={status}). "
+                f"Memstate will extract facts and organize them into keypaths automatically. "
+                f"Processing typically takes 15-20 seconds."
+            )
+
+        # Sync response (fallback when Redis not configured)
+        memories_created = data.get("memories_created", 0)
+        ingestion_id = data.get("ingestion_id", "unknown")
+        return (
+            f"Successfully remembered content (ingestion_id={ingestion_id}). "
+            f"Created {memories_created} structured memories from your content."
+        )
+
+
+class MemstateStoreTool(BaseTool):
+    """Store a precise value at a specific keypath in Memstate AI.
+
+    Use this for targeted updates where you know exactly what keypath to
+    set and what value to store. For saving task summaries, notes, or
+    any freeform text, use memstate_remember instead.
+    """
+
+    name: str = "memstate_store"
+    description: str = (
+        "Store an exact value at a specific keypath. Use this for precise, targeted "
+        "updates where you know the exact keypath (e.g. 'config.database.port', "
+        "'status.deployment', 'version.current'). Memstate automatically versions "
+        "the memory if it already exists. For saving freeform text, summaries, or "
+        "anything where you want automatic organization, use memstate_remember instead."
+    )
+    args_schema: Type[BaseModel] = StoreInput
 
     api_key: str
     project_id: str
@@ -123,7 +217,7 @@ class MemstateRememberTool(BaseTool):
     def _run(self, content: str, keypath: str) -> str:
         with _make_client(self.api_key, self.base_url) as client:
             resp = client.post(
-                "/api/v1/memories/remember",
+                "/api/v1/memories/store",
                 json={
                     "content": content,
                     "keypath": keypath,
@@ -277,7 +371,7 @@ class MemstateGetHistoryTool(BaseTool):
             summary = v.get("summary", v.get("content", ""))[:120]
             created = v.get("created_at", "unknown")
             superseded = v.get("superseded_by")
-            status = f"→ superseded by v{superseded}" if superseded else "(current)"
+            status = f"superseded by v{superseded}" if superseded else "(current)"
             lines.append(f"  v{ver_num} [{created}] {status}\n    {summary}")
         return "\n".join(lines)
 
@@ -288,7 +382,7 @@ class MemstateTimeTravelTool(BaseTool):
     name: str = "memstate_time_travel"
     description: str = (
         "Retrieve the state of all memories under a keypath at a specific past revision. "
-        "This is Memstate's time-travel feature — every ingestion creates a new revision, "
+        "This is Memstate's time-travel feature -- every ingestion creates a new revision, "
         "and you can reconstruct exactly what was known at any point in history. "
         "Use memstate_get_history first to find valid revision numbers."
     )
@@ -343,8 +437,8 @@ def get_memstate_tools(
         project_id: Memstate project to scope all operations to.
         base_url: Memstate API base URL. Defaults to https://api.memstate.ai.
         include_tools: Optional list of tool names to include. If None,
-            all tools are returned. Options: "remember", "recall", "browse",
-            "history", "time_travel".
+            all tools are returned. Options: "remember", "store", "recall",
+            "browse", "history", "time_travel".
 
     Returns:
         List of LangChain BaseTool instances ready to pass to an agent.
@@ -360,6 +454,9 @@ def get_memstate_tools(
     """
     all_tools: dict[str, BaseTool] = {
         "remember": MemstateRememberTool(
+            api_key=api_key, project_id=project_id, base_url=base_url
+        ),
+        "store": MemstateStoreTool(
             api_key=api_key, project_id=project_id, base_url=base_url
         ),
         "recall": MemstateRecallTool(

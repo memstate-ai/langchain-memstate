@@ -1,9 +1,14 @@
 """
-langchain-memstate — LangChain & LangGraph integration for Memstate AI.
+langchain-memstate -- LangChain & LangGraph integration for Memstate AI.
 
 Memstate AI gives your agents a structured, versioned knowledge graph
 organized by keypath hierarchies. Every fact is automatically versioned,
 semantically searchable, and time-travelable.
+
+The primary tool is `memstate_remember` -- just pass any text or markdown
+and Memstate's custom-trained models automatically extract facts and
+organize them into a hierarchical keypath structure. No manual keypath
+management required.
 
 Quick start::
 
@@ -38,11 +43,12 @@ from langchain_memstate.tools import (
     MemstateGetHistoryTool,
     MemstateRecallTool,
     MemstateRememberTool,
+    MemstateStoreTool,
     MemstateTimeTravelTool,
     get_memstate_tools,
 )
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 __all__ = [
     # Core store (LangGraph BaseStore)
@@ -54,6 +60,7 @@ __all__ = [
     # Agent tools
     "get_memstate_tools",
     "MemstateRememberTool",
+    "MemstateStoreTool",
     "MemstateRecallTool",
     "MemstateBrowseTool",
     "MemstateGetHistoryTool",
